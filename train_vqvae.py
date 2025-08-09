@@ -2,6 +2,7 @@ import argparse
 
 import torch
 import torch.optim as optim
+from torch.cuda.amp import GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from configs import VQVAEDatasetConfig, VQVAEModelConfig, VQVAETrainingConfig
@@ -23,6 +24,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_epochs", type=int, help="Number of epochs")
     parser.add_argument("--model_save_path", type=str, help="Model save path")
     parser.add_argument("--device", type=str, help="Training device (mps, cpu, cuda)")
+    parser.add_argument(
+        "--mixed_precision",
+        action="store_true",
+        help="Enable mixed precision training",
+    )
 
     return parser.parse_args()
 
@@ -55,6 +61,8 @@ def train_vqvae(
         eta_min=training_config.min_learning_rate,
     )
 
+    scaler = GradScaler(enabled=training_config.mixed_precision)
+
     print_model_params(
         model=vqvae,
     )
@@ -63,6 +71,7 @@ def train_vqvae(
         loader=loader,
         optimizer=optimizer,
         scheduler=scheduler,
+        scaler=scaler,
         training_config=training_config,
     )
 

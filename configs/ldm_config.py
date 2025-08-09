@@ -56,6 +56,7 @@ class LDMTrainingConfig:
     img_save_interval: int = 5
     lpips_eval_interval: int = 10
     eval_batch_size: int = 2
+    mixed_precision: bool = True
 
 
 @dataclass

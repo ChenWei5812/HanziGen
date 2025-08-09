@@ -13,7 +13,9 @@ def update_config_from_args(
     """
     for key, value in vars(args).items():
         if hasattr(converting_config, key) and (value is not None):
-            if isinstance(value, tuple) or isinstance(value, list):
+            if isinstance(value, bool):
+                setattr(converting_config, key, value)
+            elif isinstance(value, tuple) or isinstance(value, list):
                 setattr(
                     converting_config, key, type(getattr(converting_config, key))(value)
                 )

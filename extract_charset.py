@@ -43,6 +43,9 @@ def extract_train_val_charset(
         charset_root=dataset_config.splits_root,
     )
 
+    print(f"Train characters: {len(loader.loader.train.dataset)}")
+    print(f"Validation characters: {len(loader.loader.val.dataset)}")
+
 
 def main() -> None:
     """ """

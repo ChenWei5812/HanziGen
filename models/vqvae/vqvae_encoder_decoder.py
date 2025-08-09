@@ -126,4 +126,4 @@ class VQVAEQuantizer(nn.Module):
 
         quantized = rearrange(quantized, "b h w c -> b c h w")
 
-        return quantized, loss
+        return quantized, loss, encoding_indices

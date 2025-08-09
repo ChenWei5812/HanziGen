@@ -2,6 +2,7 @@ import argparse
 
 import torch
 import torch.optim as optim
+from torch.cuda.amp import GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from configs import (
@@ -38,6 +39,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--eval_batch_size", type=int, help="Batch size for evaluation")
     parser.add_argument("--device", type=str, help="Training device (mps, cpu, cuda)")
+    parser.add_argument(
+        "--mixed_precision",
+        action="store_true",
+        help="Enable mixed precision training",
+    )
 
     return parser.parse_args()
 
@@ -72,6 +78,8 @@ def train_ldm(
         eta_min=training_config.min_learning_rate,
     )
 
+    scaler = GradScaler(enabled=training_config.mixed_precision)
+
     print_model_params(
         model=ldm,
     )
@@ -80,6 +88,7 @@ def train_ldm(
         loader=loader,
         optimizer=optimizer,
         scheduler=scheduler,
+        scaler=scaler,
         training_config=training_config,
     )
 

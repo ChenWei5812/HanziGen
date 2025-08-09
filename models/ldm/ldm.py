@@ -133,6 +133,7 @@ class LDM(nn.Module):
         batch: dict[str, Tensor],
         is_training: bool,
         optimizer: Optimizer | None = None,
+        scaler: torch.cuda.amp.GradScaler | None = None,
     ) -> float:
         """
         Process a single batch of data.
@@ -143,18 +144,24 @@ class LDM(nn.Module):
         batch_size = tgt_imgs.shape[0]
         t = self.scheduler.sample_timesteps(batch_size)
 
-        tgt_latents = self._encode_to_latent(tgt_imgs)
-        x_t, noise = self.scheduler.add_noise(tgt_latents, t)
-        ref_latents = self._encode_to_latent(ref_imgs)
+        with torch.autocast(
+            device_type=self.device.type,
+            enabled=scaler.is_enabled() if scaler else False,
+        ):
+            tgt_latents = self._encode_to_latent(tgt_imgs)
+            x_t, noise = self.scheduler.add_noise(tgt_latents, t)
+            ref_latents = self._encode_to_latent(ref_imgs)
 
-        noise_pred = self(x_t, ref_latents, t)
-        loss = self.loss_fn(noise_pred, noise)
+            noise_pred = self(x_t, ref_latents, t)
+            loss = self.loss_fn(noise_pred, noise)
 
-        if is_training and optimizer is not None:
+        if is_training and optimizer is not None and scaler is not None:
             optimizer.zero_grad()
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
         return loss.item()
 
@@ -163,7 +170,7 @@ class LDM(nn.Module):
         Encode and quantize images.
         """
         latents = self.vqvae_encoder(images)
-        quantized_latents, _ = self.vqvae_quantizer(latents)
+        quantized_latents, _, _ = self.vqvae_quantizer(latents)
 
         return quantized_latents
 
@@ -179,6 +186,7 @@ class LDM(nn.Module):
         loader: Loader,
         optimizer: Optimizer,
         scheduler: LRScheduler,
+        scaler: torch.cuda.amp.GradScaler,
         training_config: LDMTrainingConfig,
     ) -> None:
         """
@@ -211,6 +219,7 @@ class LDM(nn.Module):
                 train_loss, val_loss = self._run_epoch(
                     loader=loader,
                     optimizer=optimizer,
+                    scaler=scaler,
                 )
 
                 # Update learning rate
@@ -264,6 +273,7 @@ class LDM(nn.Module):
         self,
         loader: Loader,
         optimizer: Optimizer,
+        scaler: torch.cuda.amp.GradScaler,
     ) -> tuple[float, float]:
         """
         Run one epoch of training and validation.
@@ -271,7 +281,7 @@ class LDM(nn.Module):
         train_loader = loader.loader.train
         val_loader = loader.loader.val
 
-        train_loss = self._train_one_epoch(train_loader, optimizer)
+        train_loss = self._train_one_epoch(train_loader, optimizer, scaler)
         val_loss = self._validate_one_epoch(val_loader)
 
         return train_loss, val_loss
@@ -280,6 +290,7 @@ class LDM(nn.Module):
         self,
         train_loader: DataLoader,
         optimizer: Optimizer,
+        scaler: torch.cuda.amp.GradScaler,
     ) -> float:
         """
         Train the model for one epoch.
@@ -292,6 +303,7 @@ class LDM(nn.Module):
                 batch=batch,
                 is_training=True,
                 optimizer=optimizer,
+                scaler=scaler,
             )
             epoch_loss += batch_loss
 

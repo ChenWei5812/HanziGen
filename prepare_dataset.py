@@ -1,4 +1,6 @@
 import argparse
+import shutil
+from pathlib import Path
 
 from configs import FontProcessingConfig
 from utils.argparse.argparse_utils import update_config_from_args
@@ -28,6 +30,10 @@ def prepare_image_dataset(
     font_processing_config: FontProcessingConfig,
 ) -> None:
     """ """
+    data_dir = Path("data")
+    if data_dir.exists():
+        shutil.rmtree(data_dir)
+
     tgt_generator = GlyphImageGenerator.from_target_font(
         target_font_path=target_font_path,
         font_processing_config=font_processing_config,

@@ -62,22 +62,25 @@ class VQVAE(nn.Module):
     def forward(
         self,
         x: Tensor,
-    ) -> tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor]:
         """
         Forward pass of the VQ-VAE model.
         """
 
         encoded_features = self.encoder(x)
-        quantized_features, vq_loss = self.vector_quantizer(encoded_features)
+        quantized_features, vq_loss, encoding_indices = self.vector_quantizer(
+            encoded_features
+        )
         x_recon = self.decoder(quantized_features)
 
-        return x_recon, vq_loss
+        return x_recon, vq_loss, encoding_indices
 
     def _process_batch(
         self,
         batch: dict[str, Tensor],
         is_training: bool,
         optimizer: Optimizer | None = None,
+        scaler: torch.cuda.amp.GradScaler | None = None,
     ) -> dict[str, float]:
         """
         Process a single batch of data.
@@ -85,29 +88,42 @@ class VQVAE(nn.Module):
         tgt_imgs = batch["tgt_img"].to(self.device)
         ref_imgs = batch["ref_img"].to(self.device)
 
-        tgt_x_recon, tgt_vq_loss = self(tgt_imgs)
-        tgt_recon_loss = self.loss_fn(tgt_x_recon, tgt_imgs)
+        with torch.autocast(
+            device_type=self.device.type,
+            enabled=scaler.is_enabled() if scaler else False,
+        ):
+            tgt_x_recon, tgt_vq_loss, tgt_indices = self(tgt_imgs)
+            tgt_recon_loss = self.loss_fn(tgt_x_recon, tgt_imgs)
 
-        ref_x_recon, ref_vq_loss = self(ref_imgs)
-        ref_recon_loss = self.loss_fn(ref_x_recon, ref_imgs)
+            ref_x_recon, ref_vq_loss, ref_indices = self(ref_imgs)
+            ref_recon_loss = self.loss_fn(ref_x_recon, ref_imgs)
 
-        recon_loss = (tgt_recon_loss + ref_recon_loss) / 2
-        vq_loss = (tgt_vq_loss + ref_vq_loss) / 2
-        total_loss = recon_loss + vq_loss
+            recon_loss = (tgt_recon_loss + ref_recon_loss) / 2
+            vq_loss = (tgt_vq_loss + ref_vq_loss) / 2
+            total_loss = recon_loss + vq_loss
 
-        if is_training and optimizer is not None:
+        if is_training and optimizer is not None and scaler is not None:
             optimizer.zero_grad()
-            total_loss.backward()
+            scaler.scale(total_loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
-        losses = {
+        # ===== Compute Metrics =====
+        all_indices = torch.cat([tgt_indices, ref_indices])
+        perplexity = self._compute_perplexity(all_indices)
+        codebook_usage = self._compute_codebook_usage(all_indices)
+
+        metrics = {
             "total": total_loss.item(),
             "recon": recon_loss.item(),
             "vq": vq_loss.item(),
+            "perplexity": perplexity.item(),
+            "codebook_usage": codebook_usage,
         }
 
-        return losses
+        return metrics
 
     # ===== Training and Validation =====
     def fit(
@@ -115,6 +131,7 @@ class VQVAE(nn.Module):
         loader: Loader,
         optimizer: Optimizer,
         scheduler: LRScheduler,
+        scaler: torch.cuda.amp.GradScaler,
         training_config: VQVAETrainingConfig,
     ) -> None:
         """
@@ -135,9 +152,10 @@ class VQVAE(nn.Module):
             for epoch in range(training_config.num_epochs):
 
                 # Train and validate for one epoch
-                train_losses, val_losses = self._run_epoch(
+                train_metrics, val_metrics = self._run_epoch(
                     loader=loader,
                     optimizer=optimizer,
+                    scaler=scaler,
                 )
 
                 # Update learning rate
@@ -148,14 +166,14 @@ class VQVAE(nn.Module):
                 self._log_training_metrics(
                     writer=writer,
                     epoch=epoch,
-                    train_losses=train_losses,
-                    val_losses=val_losses,
+                    train_metrics=train_metrics,
+                    val_metrics=val_metrics,
                     learning_rate=current_lr,
                 )
 
                 # Save the best model checkpoint
-                if val_losses["total"] < min_val_loss:
-                    min_val_loss = val_losses["total"]
+                if val_metrics["total"] < min_val_loss:
+                    min_val_loss = val_metrics["total"]
                     torch.save(self.state_dict(), model_save_path)
                     print(f"✅ Best model saved (val loss: {min_val_loss:.6f})")
 
@@ -163,8 +181,8 @@ class VQVAE(nn.Module):
                 self._print_epoch_status(
                     epoch=epoch + 1,
                     total_epochs=training_config.num_epochs,
-                    train_losses=train_losses,
-                    val_losses=val_losses,
+                    train_metrics=train_metrics,
+                    val_metrics=val_metrics,
                     learning_rate=current_lr,
                 )
 
@@ -172,6 +190,7 @@ class VQVAE(nn.Module):
         self,
         loader: Loader,
         optimizer: Optimizer,
+        scaler: torch.cuda.amp.GradScaler,
     ) -> tuple[dict[str, float], dict[str, float]]:
         """
         Run one epoch of training and validation.
@@ -179,7 +198,7 @@ class VQVAE(nn.Module):
         train_loader = loader.loader.train
         val_loader = loader.loader.val
 
-        train_losses = self._train_one_epoch(train_loader, optimizer)
+        train_losses = self._train_one_epoch(train_loader, optimizer, scaler)
         val_losses = self._validate_one_epoch(val_loader)
 
         return train_losses, val_losses
@@ -188,25 +207,34 @@ class VQVAE(nn.Module):
         self,
         train_loader: DataLoader,
         optimizer: Optimizer,
+        scaler: torch.cuda.amp.GradScaler,
     ) -> dict[str, float]:
         """
         Train the model for one epoch.
         """
         self.train()
-        epoch_losses = {"total": 0.0, "recon": 0.0, "vq": 0.0}
+        epoch_metrics = {
+            "total": 0.0,
+            "recon": 0.0,
+            "vq": 0.0,
+            "perplexity": 0.0,
+            "codebook_usage": 0.0,
+        }
 
         for batch in tqdm(train_loader, desc="Training"):
-            batch_losses = self._process_batch(
+            batch_metrics = self._process_batch(
                 batch=batch,
                 is_training=True,
                 optimizer=optimizer,
+                scaler=scaler,
             )
-            for k in epoch_losses.keys():
-                epoch_losses[k] += batch_losses[k]
+            for k in epoch_metrics.keys():
+                epoch_metrics[k] += batch_metrics[k]
 
         num_batches = len(train_loader)
         return {
-            loss_type: loss / num_batches for loss_type, loss in epoch_losses.items()
+            metric_type: metric / num_batches
+            for metric_type, metric in epoch_metrics.items()
         }
 
     @torch.no_grad()
@@ -218,39 +246,69 @@ class VQVAE(nn.Module):
         Validate the model for one epoch.
         """
         self.eval()
-        epoch_losses = {"total": 0.0, "recon": 0.0, "vq": 0.0}
+        epoch_metrics = {
+            "total": 0.0,
+            "recon": 0.0,
+            "vq": 0.0,
+            "perplexity": 0.0,
+            "codebook_usage": 0.0,
+        }
 
         for batch in tqdm(val_loader, desc="Validating"):
-            batch_losses = self._process_batch(
+            batch_metrics = self._process_batch(
                 batch=batch,
                 is_training=False,
                 optimizer=None,
             )
-            for k in epoch_losses.keys():
-                epoch_losses[k] += batch_losses[k]
+            for k in epoch_metrics.keys():
+                epoch_metrics[k] += batch_metrics[k]
 
         num_batches = len(val_loader)
         return {
-            loss_type: loss / num_batches for loss_type, loss in epoch_losses.items()
+            metric_type: metric / num_batches
+            for metric_type, metric in epoch_metrics.items()
         }
+
+    # ===== Metrics =====
+    def _compute_perplexity(self, indices: Tensor) -> Tensor:
+        """
+        Compute the perplexity of the codebook usage.
+        """
+        # Calculate the frequency of each index
+        index_counts = torch.bincount(indices.view(-1), minlength=self.vector_quantizer.codebook_size)
+        # Calculate the probability distribution
+        index_probs = index_counts.float() / index_counts.sum()
+        # Compute entropy, adding a small epsilon to avoid log(0)
+        entropy = -torch.sum(index_probs * torch.log(index_probs + 1e-10))
+        # Perplexity is the exponential of the entropy
+        return torch.exp(entropy)
+
+    def _compute_codebook_usage(self, indices: Tensor) -> float:
+        """
+        Compute the percentage of the codebook that is used.
+        """
+        # Count unique indices used
+        unique_indices = torch.unique(indices)
+        # Calculate the ratio of used indices to the total codebook size
+        return (len(unique_indices) / self.vector_quantizer.codebook_size) * 100.0
 
     # ===== Logging =====
     def _log_training_metrics(
         self,
         writer: SummaryWriter,
         epoch: int,
-        train_losses: dict,
-        val_losses: dict,
+        train_metrics: dict,
+        val_metrics: dict,
         learning_rate: float,
     ) -> None:
         """
         Log training and validation metrics to TensorBoard.
         """
-        for loss_type, loss_value in train_losses.items():
-            writer.add_scalar(f"Loss/train/{loss_type}", loss_value, epoch)
+        for metric_type, metric_value in train_metrics.items():
+            writer.add_scalar(f"train/{metric_type}", metric_value, epoch)
 
-        for loss_type, loss_value in val_losses.items():
-            writer.add_scalar(f"Loss/val/{loss_type}", loss_value, epoch)
+        for metric_type, metric_value in val_metrics.items():
+            writer.add_scalar(f"val/{metric_type}", metric_value, epoch)
 
         writer.add_scalar("LR", learning_rate, epoch)
 
@@ -258,8 +316,8 @@ class VQVAE(nn.Module):
         self,
         epoch: int,
         total_epochs: int,
-        train_losses: dict,
-        val_losses: dict,
+        train_metrics: dict,
+        val_metrics: dict,
         learning_rate: float,
     ) -> None:
         """
@@ -269,14 +327,14 @@ class VQVAE(nn.Module):
         table = Table(title=f"Epoch Status [{epoch}/{total_epochs}]")
 
         table.add_column("Metric", justify="left", style="cyan", no_wrap=True)
-        table.add_column("Train Loss", justify="right", style="magenta")
-        table.add_column("Val Loss", justify="right", style="green")
+        table.add_column("Train", justify="right", style="magenta")
+        table.add_column("Validation", justify="right", style="green")
 
-        for loss_type in train_losses.keys():
+        for metric_type in train_metrics.keys():
             table.add_row(
-                loss_type.capitalize(),
-                f"{train_losses[loss_type]:.6f}",
-                f"{val_losses[loss_type]:.6f}",
+                metric_type.replace("_", " ").capitalize(),
+                f"{train_metrics[metric_type]:.4f}",
+                f"{val_metrics[metric_type]:.4f}",
             )
 
         table.add_row("Learning Rate", f"{learning_rate:.6f}", "-")

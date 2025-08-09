@@ -43,3 +43,4 @@ class VQVAETrainingConfig:
     model_save_path: str = "checkpoints/vqvae.pth"
 
     tensorboard_log_dir: str = "runs/VQVAE"
+    mixed_precision: bool = True
