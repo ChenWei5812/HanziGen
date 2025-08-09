@@ -25,6 +25,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model_save_path", type=str, help="Model save path")
     parser.add_argument("--device", type=str, help="Training device (mps, cpu, cuda)")
     parser.add_argument(
+        "--resume_from",
+        type=str,
+        help="Path to VQVAE weights (.pth) to resume from (only loads model state)",
+    )
+    parser.add_argument(
         "--mixed_precision",
         action="store_true",
         help="Enable mixed precision training",
@@ -38,6 +43,7 @@ def train_vqvae(
     model_config: VQVAEModelConfig,
     training_config: VQVAETrainingConfig,
     device: torch.device,
+    resume_from: str | None = None,
 ):
     """ """
     loader = Loader.from_dataset_config(
@@ -49,6 +55,15 @@ def train_vqvae(
         model_config=model_config,
         device=device,
     )
+
+    # ==== Simplified resume: load model weights only ====
+    if resume_from:
+        try:
+            ckpt = torch.load(resume_from, map_location=device, weights_only=True)
+        except TypeError:
+            ckpt = torch.load(resume_from, map_location=device)
+        vqvae.load_state_dict(ckpt, strict=True)
+        print(f"[Resume] Loaded VQVAE weights from: {resume_from}")
 
     optimizer = optim.Adam(
         vqvae.parameters(),
@@ -98,6 +113,7 @@ def main() -> None:
         model_config=model_config,
         training_config=training_config,
         device=device,
+        resume_from=args.resume_from,
     )
 
 

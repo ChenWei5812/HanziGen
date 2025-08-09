@@ -40,6 +40,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval_batch_size", type=int, help="Batch size for evaluation")
     parser.add_argument("--device", type=str, help="Training device (mps, cpu, cuda)")
     parser.add_argument(
+        "--resume_from",
+        type=str,
+        help="Path to LDM weights (.pth) to resume from (only loads model state)",
+    )
+    parser.add_argument(
         "--mixed_precision",
         action="store_true",
         help="Enable mixed precision training",
@@ -54,6 +59,7 @@ def train_ldm(
     ldm_model_config: LDMModelConfig,
     training_config: LDMTrainingConfig,
     device: torch.device,
+    resume_from: str | None = None,
 ):
     """ """
     loader = Loader.from_dataset_config(
@@ -66,6 +72,15 @@ def train_ldm(
         ldm_model_config=ldm_model_config,
         device=device,
     )
+
+    # ==== Simplified resume: load model weights only ====
+    if resume_from:
+        try:
+            ckpt = torch.load(resume_from, map_location=device, weights_only=True)
+        except TypeError:
+            ckpt = torch.load(resume_from, map_location=device)
+        ldm.load_state_dict(ckpt, strict=True)
+        print(f"[Resume] Loaded LDM weights from: {resume_from}")
 
     optimizer = optim.Adam(
         ldm.parameters(),
@@ -120,6 +135,7 @@ def main() -> None:
         ldm_model_config=ldm_model_config,
         training_config=training_config,
         device=device,
+        resume_from=args.resume_from,
     )
 
 
