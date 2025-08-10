@@ -1,4 +1,6 @@
 #!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/.."
 
 # =============== 基础参数（按需修改） ===============
 TARGET_FONT_PATH="fonts/myfont.ttf"   # 目标字体路径（用于数据集构建/分析）
@@ -29,13 +31,13 @@ PRETRAINED_VQVAE_PATH="checkpoints/vqvae_${TARGET_FONT_NAME}.pth"
 MODEL_SAVE_PATH="checkpoints/ldm_${TARGET_FONT_NAME}.pth"
 SAMPLE_ROOT="samples_${TARGET_FONT_NAME}/"
 
-# 组装可选参数
-EXTRA_ARGS=""
+# 组装参数
+ARGS=()
 if [ -n "$RESUME_FROM" ]; then
-  EXTRA_ARGS+=" --resume_from \"$RESUME_FROM\""
+  ARGS+=(--resume_from "$RESUME_FROM")
 fi
 if [ "$ENABLE_MIXED_PRECISION" -eq 1 ]; then
-  EXTRA_ARGS+=" --mixed_precision"
+  ARGS+=(--mixed_precision)
 fi
 
 # =============== 启动训练 ===============
@@ -53,4 +55,4 @@ python train_ldm.py \
     --lpips_eval_interval "$LPIPS_EVAL_INTERVAL" \
     --eval_batch_size "$EVAL_BATCH_SIZE" \
     --device "$DEVICE" \
-    $EXTRA_ARGS
+    "${ARGS[@]}"

@@ -1,4 +1,6 @@
 #!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/.."
 
 # =============== 基础参数（按需修改） ===============
 TARGET_FONT_PATH="fonts/myfont.ttf"   # 目标字体路径（用于数据集构建/分析），格式为.ttf或.otf
@@ -22,13 +24,13 @@ ENABLE_MIXED_PRECISION=1               # 1 表示启用混合精度（需 CUDA�
 TARGET_FONT_NAME=$(basename "$TARGET_FONT_PATH" | sed -E 's/\.(ttf|otf)$//')
 MODEL_SAVE_PATH="checkpoints/vqvae_${TARGET_FONT_NAME}.pth"
 
-# 组装可选参数
-EXTRA_ARGS=""
+# 组装参数
+ARGS=()
 if [ -n "$RESUME_FROM" ]; then
-  EXTRA_ARGS+=" --resume_from \"$RESUME_FROM\""
+  ARGS+=(--resume_from "$RESUME_FROM")
 fi
 if [ "$ENABLE_MIXED_PRECISION" -eq 1 ]; then
-  EXTRA_ARGS+=" --mixed_precision"
+  ARGS+=(--mixed_precision)
 fi
 
 # =============== 启动训练 ===============
@@ -40,4 +42,4 @@ python train_vqvae.py \
     --num_epochs "$NUM_EPOCHS" \
     --model_save_path "$MODEL_SAVE_PATH" \
     --device "$DEVICE" \
-    $EXTRA_ARGS
+    "${ARGS[@]}"
