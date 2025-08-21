@@ -11,7 +11,7 @@ TARGET_FONT_NAME=$(basename "$TARGET_FONT_PATH" | sed -E 's/\.(ttf|otf)$//')
 
 SOURCE_CHARSET_PATH="charsets/unihan_coverage/${TARGET_FONT_NAME}/covered.txt"
 
-python prepare_dataset.py \
+python3 prepare_dataset.py \
     --target_font_path "$TARGET_FONT_PATH" \
     --reference_fonts_dir "$REFERENCE_FONTS_DIR" \
     --source_charset_path "$SOURCE_CHARSET_PATH" \
