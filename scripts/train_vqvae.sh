@@ -9,7 +9,7 @@ VAL_SPLIT_RATIO=0.2                    # 验证集占比
 RANDOM_SEED=7777                       # 随机种子（保证可复现）
 BATCH_SIZE=8                           # 每批次训练的样本数量（根据显存调整）
 LEARNING_RATE=1e-3                     # 初始学习率，实际学习率会根据余弦退火策略动态调整
-NUM_EPOCHS=100                         # 训练轮数
+NUM_EPOCHS=1000                         # 训练轮数
 DEVICE="cuda"                          # 训练设备：cuda / cpu / mps 
                                        #（cuda就是使用Nvidia GPU   mps就是使用Apple Silicon GPU）
 
@@ -34,7 +34,7 @@ if [ "$ENABLE_MIXED_PRECISION" -eq 1 ]; then
 fi
 
 # =============== 启动训练 ===============
-python train_vqvae.py \
+python3 train_vqvae.py \
     --split_ratios "$TRAIN_SPLIT_RATIO" "$VAL_SPLIT_RATIO" \
     --random_seed "$RANDOM_SEED" \
     --batch_size "$BATCH_SIZE" \
