@@ -69,7 +69,7 @@
 
 1. **下載本專案：**
 ```bash
-git clone https://github.com/wangwenho/HanziGen.git
+git clone https://github.com/ChenWei5812/HanziGen.git
 ```
 
 2. **建立 Conda 環境：**
