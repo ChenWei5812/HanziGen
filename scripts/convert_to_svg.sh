@@ -12,7 +12,7 @@ TARGET_FONT_NAME=$(basename "$TARGET_FONT_PATH" | sed -E 's/\.(ttf|otf)$//')
 INPUT_DIR="samples_${TARGET_FONT_NAME}/inference/gen"
 OUTPUT_DIR="svgs_${TARGET_FONT_NAME}"
 
-python convert_to_svg.py \
+python3 convert_to_svg.py \
     --input_dir "$INPUT_DIR" \
     --output_dir "$OUTPUT_DIR" \
     --blacklevel "$BLACKLEVEL" \
