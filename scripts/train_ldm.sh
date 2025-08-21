@@ -9,7 +9,7 @@ VAL_SPLIT_RATIO=0.2                    # 验证集占比
 RANDOM_SEED=9999                       # 随机种子（保证可复现）
 BATCH_SIZE=16                          # 每批训练的样本数量（根据显存调整）
 LEARNING_RATE=5e-4                     # 初始学习率，实际学习率会根据余弦退火策略动态调整
-NUM_EPOCHS=250                         # 训练轮数
+NUM_EPOCHS=1000                         # 训练轮数
 SAMPLE_STEPS=50                        # 样例图生成时的采样步数（用于可视化/评估）
 IMG_SAVE_INTERVAL=10                   # 可视化图片保存间隔（单位：epoch）
 LPIPS_EVAL_INTERVAL=10                 # LPIPS 评估间隔（单位：epoch）
@@ -41,7 +41,7 @@ if [ "$ENABLE_MIXED_PRECISION" -eq 1 ]; then
 fi
 
 # =============== 启动训练 ===============
-python train_ldm.py \
+python3 train_ldm.py \
     --split_ratios "$TRAIN_SPLIT_RATIO" "$VAL_SPLIT_RATIO" \
     --random_seed "$RANDOM_SEED" \
     --batch_size "$BATCH_SIZE" \
